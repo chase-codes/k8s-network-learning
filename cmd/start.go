@@ -20,9 +20,9 @@ var startCmd = &cobra.Command{
 			log.Fatal(fmt.Errorf("failed to start NetLab TUI: %w", err))
 		}
 
-		// If a module was selected, launch it
+		// If a module was selected, launch it with dependency checking
 		if moduleID != "" {
-			if err := modules.RunModule(moduleID); err != nil {
+			if err := modules.RunModuleWithDependencyCheck(moduleID); err != nil {
 				log.Fatal(fmt.Errorf("failed to run module %s: %w", moduleID, err))
 			}
 		}

@@ -16,7 +16,7 @@ var moduleCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		moduleID := args[0]
-		if err := modules.RunModule(moduleID); err != nil {
+		if err := modules.RunModuleWithDependencyCheck(moduleID); err != nil {
 			log.Fatal(fmt.Errorf("failed to run module %s: %w", moduleID, err))
 		}
 	},
