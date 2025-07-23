@@ -15,7 +15,7 @@ var startCmd = &cobra.Command{
 	Short: "Launch the NetLab TUI welcome screen",
 	Long:  "Start the interactive NetLab terminal interface with module selection menu.",
 	Run: func(cmd *cobra.Command, args []string) {
-		moduleID, err := tui.StartWelcome()
+		moduleID, err := tui.StartEnhancedWelcome()
 		if err != nil {
 			log.Fatal(fmt.Errorf("failed to start NetLab TUI: %w", err))
 		}

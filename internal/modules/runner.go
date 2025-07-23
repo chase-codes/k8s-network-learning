@@ -10,7 +10,7 @@ import (
 func RunModule(moduleID string) error {
 	switch moduleID {
 	case "01-osi-model":
-		return osimodel.Run()
+		return osimodel.RunEnhanced()
 	case "02-tcp-ip":
 		return fmt.Errorf("module %s is not implemented yet", moduleID)
 	case "03-subnetting":
