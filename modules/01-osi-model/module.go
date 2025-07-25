@@ -74,7 +74,7 @@ func NewModel() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.EnableMouseCellMotion
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -117,6 +117,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = m.viewportHeight
 			m.viewport.SetContent(m.getDetailContent())
 		}
+
+	case tea.MouseMsg:
+		// Forward mouse events to viewport for text selection
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 
 	case tea.KeyMsg:
 		switch msg.String() {

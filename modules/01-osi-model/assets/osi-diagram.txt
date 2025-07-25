@@ -1,0 +1,34 @@
+┌─────────────────────────────────────────────────────────────────┐
+│                        OSI MODEL LAYERS                        │
+├─────────────────────────────────────────────────────────────────┤
+│  7  │ APPLICATION  │ HTTP, FTP, SMTP, DNS, SSH                │
+│     │    LAYER     │ User Interface & Network Services        │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  6  │ PRESENTATION │ SSL/TLS, JPEG, MPEG, Encryption         │
+│     │    LAYER     │ Data Translation & Encryption            │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  5  │   SESSION    │ NetBIOS, RPC, SQL Sessions               │
+│     │    LAYER     │ Session Management & Control             │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  4  │  TRANSPORT   │ TCP, UDP, Port Numbers                   │
+│     │    LAYER     │ End-to-End Delivery & Flow Control       │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  3  │   NETWORK    │ IP, ICMP, OSPF, BGP, Routing            │
+│     │    LAYER     │ Logical Addressing & Path Selection      │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  2  │  DATA LINK   │ Ethernet, Wi-Fi, MAC Addresses          │
+│     │    LAYER     │ Node-to-Node Delivery & Error Detection  │
+├─────┼──────────────┼───────────────────────────────────────────┤
+│  1  │   PHYSICAL   │ Cables, Radio, Fiber, Electrical Signals│
+│     │    LAYER     │ Physical Transmission Medium             │
+└─────┴──────────────┴───────────────────────────────────────────┘
+
+Mnemonic: "Please Do Not Throw Sausage Pizza Away"
+          Physical, Data Link, Network, Transport, Session, Presentation, Application
+
+In our Kubernetes lab:
+- Layer 7: HTTP GET request from busybox to nginx
+- Layer 4: TCP connection on port 80
+- Layer 3: IP routing between pod IPs
+- Layer 2: Ethernet frames within the kind container
+- Layer 1: Virtual network interfaces (veth pairs)

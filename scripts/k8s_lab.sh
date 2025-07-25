@@ -300,6 +300,49 @@ EOF
     print_success "Busybox pod deployed successfully"
 }
 
+# Function to capture packets using host tcpdump (fallback)
+capture_with_host_tcpdump() {
+    local nginx_ip="$1"
+    print_status "Using host tcpdump to capture traffic..."
+    
+    # Get docker network for kind
+    local docker_network=$(docker network inspect kind | grep '"Subnet"' | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+    
+    if [ -z "$docker_network" ]; then
+        print_error "Could not determine docker network for kind cluster"
+        return 1
+    fi
+    
+    print_status "Capturing traffic on network: $docker_network"
+    
+    # Start host tcpdump in background
+    sudo tcpdump -i any -w "$CAPTURE_FILE" net "$docker_network" and host "$nginx_ip" &
+    local tcpdump_pid=$!
+    
+    # Wait for tcpdump to start
+    sleep 3
+    
+    # Make HTTP requests
+    print_status "Making HTTP request from busybox to nginx..."
+    kubectl exec busybox -- wget -qO- http://nginx/ > /dev/null || true
+    kubectl exec busybox -- wget -qO- http://nginx/ > /dev/null || true
+    kubectl exec busybox -- wget -qO- http://nginx/ > /dev/null || true
+    
+    # Wait and stop capture
+    sleep 3
+    print_status "Stopping host packet capture..."
+    sudo kill $tcpdump_pid 2>/dev/null || true
+    sleep 2
+    
+    if [ -f "$CAPTURE_FILE" ]; then
+        print_success "Host-based packet capture completed"
+        return 0
+    else
+        print_error "Host-based packet capture failed"
+        return 1
+    fi
+}
+
 # Function to capture packets
 capture_packets() {
     print_status "Setting up packet capture..."
@@ -313,23 +356,18 @@ capture_packets() {
     
     # Install tcpdump in the kind container if not present
     print_status "Installing tcpdump in kind container..."
-    docker exec "$container_name" sh -c "apt-get update > /dev/null 2>&1 && apt-get install -y tcpdump > /dev/null 2>&1" || {
-        print_warning "Failed to install tcpdump, trying alternative approach..."
-        # Alternative: use host tcpdump to capture docker network traffic
-        print_status "Using host tcpdump to capture docker network..."
-        local docker_network=$(docker network inspect kind | grep '"IPAM"' -A 10 | grep '"Subnet"' | head -1 | cut -d'"' -f4)
-        sudo tcpdump -i any -w "$CAPTURE_FILE" net "$docker_network" and host "$nginx_ip" &
-        local tcpdump_pid=$!
-        return 0
-    }
+    if ! docker exec "$container_name" sh -c "apt-get update > /dev/null 2>&1 && apt-get install -y tcpdump > /dev/null 2>&1"; then
+        print_warning "Failed to install tcpdump in container, using host-based capture..."
+        capture_with_host_tcpdump "$nginx_ip"
+        return $?
+    fi
     
-    # Start packet capture in background
+    # Start packet capture in background (use /var/tmp to avoid tmpfs issues)
     print_status "Starting packet capture on kind container..."
-    docker exec "$container_name" tcpdump -i any -w /tmp/capture.pcap host "$nginx_ip" &
-    local tcpdump_pid=$!
+    docker exec -d "$container_name" sh -c "tcpdump -i any -w /var/tmp/capture.pcap host $nginx_ip"
     
     # Wait a moment for tcpdump to start
-    sleep 2
+    sleep 3
     
     # Make HTTP request from busybox to nginx
     print_status "Making HTTP request from busybox to nginx..."
@@ -340,14 +378,27 @@ capture_packets() {
     # Wait a bit more to capture all packets
     sleep 3
     
-    # Stop packet capture
+    # Stop packet capture properly
     print_status "Stopping packet capture..."
-    kill $tcpdump_pid 2>/dev/null || true
-    sleep 1
+    docker exec "$container_name" pkill -f tcpdump || true
+    sleep 2  # Give tcpdump time to flush buffers and write file
     
-    # Copy capture file from container
-    print_status "Copying packet capture file..."
-    docker cp "$container_name:/tmp/capture.pcap" "$CAPTURE_FILE"
+    # Verify capture file exists before copying
+    print_status "Verifying packet capture file..."
+    if docker exec "$container_name" test -f /var/tmp/capture.pcap; then
+        local file_size=$(docker exec "$container_name" stat -c%s /var/tmp/capture.pcap)
+        print_status "Found capture file (${file_size} bytes)"
+        
+        # Copy capture file from container
+        print_status "Copying packet capture file..."
+        docker cp "$container_name:/var/tmp/capture.pcap" "$CAPTURE_FILE"
+    else
+        print_error "Capture file not found in container. Checking for running tcpdump processes..."
+        docker exec "$container_name" ps aux | grep tcpdump || true
+        print_warning "Container-based capture failed, trying host-based approach..."
+        capture_with_host_tcpdump "$nginx_ip"
+        return $?
+    fi
     
     if [ -f "$CAPTURE_FILE" ]; then
         print_success "Packet capture saved to $CAPTURE_FILE"

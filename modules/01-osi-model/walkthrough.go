@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"netlab/pkg/styles"
 
@@ -53,7 +54,10 @@ func NewWalkthroughModel() WalkthroughModel {
 }
 
 func (m WalkthroughModel) Init() tea.Cmd {
-	return m.checkLabStatus()
+	return tea.Batch(
+		m.checkLabStatus(),
+		tea.EnableMouseCellMotion,
+	)
 }
 
 func (m WalkthroughModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -94,6 +98,18 @@ func (m WalkthroughModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.outputViewport.Height = availableHeight / 2
 		}
 
+	case tea.MouseMsg:
+		// Forward mouse events to the appropriate viewport
+		if m.showLabSetup {
+			var cmd tea.Cmd
+			m.outputViewport, cmd = m.outputViewport.Update(msg)
+			return m, cmd
+		} else {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -132,6 +148,13 @@ func (m WalkthroughModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.labProgress = 0
 				m.labOutput = []string{}
 				return m, m.runLabCleanup()
+			}
+			return m, nil
+
+		case "e":
+			// Export logs to file
+			if len(m.labOutput) > 0 {
+				return m, m.exportLogs()
 			}
 			return m, nil
 		}
@@ -235,6 +258,15 @@ func (m WalkthroughModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateOutputViewport()
 		}
 		return m, nil
+
+	case logExportMsg:
+		if msg.success {
+			m.labOutput = append(m.labOutput, fmt.Sprintf("✅ Logs exported to: %s", msg.file))
+		} else {
+			m.labOutput = append(m.labOutput, fmt.Sprintf("❌ Export failed: %s", msg.error))
+		}
+		m.updateOutputViewport()
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -309,15 +341,23 @@ func (m WalkthroughModel) footerView() string {
 		helpKeys = []string{
 			styles.KeyBinding.Render("r") + " retry lab setup",
 			styles.KeyBinding.Render("c") + " cleanup lab",
-			styles.KeyBinding.Render("q") + " quit",
-			styles.BodyMuted.Render("(setup failed)"),
 		}
+		if len(m.labOutput) > 0 {
+			helpKeys = append(helpKeys, styles.KeyBinding.Render("e")+" export logs")
+		}
+		helpKeys = append(helpKeys,
+			styles.KeyBinding.Render("q")+" quit",
+			styles.BodyMuted.Render("(setup failed)"),
+		)
 	} else if !m.labReady {
 		helpKeys = []string{
 			styles.KeyBinding.Render("r") + " run lab setup",
 			styles.KeyBinding.Render("c") + " cleanup lab",
-			styles.KeyBinding.Render("q") + " quit",
 		}
+		if len(m.labOutput) > 0 {
+			helpKeys = append(helpKeys, styles.KeyBinding.Render("e")+" export logs")
+		}
+		helpKeys = append(helpKeys, styles.KeyBinding.Render("q")+" quit")
 	} else {
 		helpKeys = []string{
 			styles.KeyBinding.Render("←/→") + " navigate",
@@ -738,6 +778,12 @@ type labOutputMsg struct {
 	success  bool
 }
 
+type logExportMsg struct {
+	success bool
+	file    string
+	error   string
+}
+
 // getSamplePacketLayers returns sample packet data for demonstration
 func getSamplePacketLayers() []PacketLayer {
 	return []PacketLayer{
@@ -896,6 +942,7 @@ func (m WalkthroughModel) labSetupView() string {
 		Padding(1)
 
 	outputTitle := styles.H3.Render("📄 Live Output")
+	copyHint := styles.BodyMuted.Render("💡 Tip: Press 'e' to export logs to a file for copying")
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
@@ -905,6 +952,7 @@ func (m WalkthroughModel) labSetupView() string {
 		progressStyle.Render(progressDisplay),
 		"",
 		outputTitle,
+		copyHint,
 		outputStyle.Render(m.outputViewport.View()),
 	)
 
@@ -914,4 +962,34 @@ func (m WalkthroughModel) labSetupView() string {
 		content,
 		footer,
 	)
+}
+
+func (m WalkthroughModel) exportLogs() tea.Cmd {
+	return func() tea.Msg {
+		// Create logs directory if it doesn't exist
+		if err := os.MkdirAll("logs", 0755); err != nil {
+			return logExportMsg{
+				success: false,
+				error:   fmt.Sprintf("Failed to create logs directory: %s", err.Error()),
+			}
+		}
+
+		// Generate filename with timestamp
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		filename := fmt.Sprintf("logs/netlab-lab-output_%s.txt", timestamp)
+
+		// Write logs to file
+		content := strings.Join(m.labOutput, "\n")
+		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+			return logExportMsg{
+				success: false,
+				error:   fmt.Sprintf("Failed to write log file: %s", err.Error()),
+			}
+		}
+
+		return logExportMsg{
+			success: true,
+			file:    filename,
+		}
+	}
 }
