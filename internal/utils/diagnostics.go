@@ -21,6 +21,7 @@ type diagnostic struct {
 	args        []string
 	required    bool
 	description string
+	installCmd  map[string]string // OS -> install command
 }
 
 var diagnostics = []diagnostic{
@@ -30,6 +31,10 @@ var diagnostics = []diagnostic{
 		args:        []string{"version"},
 		required:    true,
 		description: "Go programming language (required for building NetLab)",
+		installCmd: map[string]string{
+			"darwin": "brew install go",
+			"linux":  "Visit https://golang.org/doc/install",
+		},
 	},
 	{
 		name:        "Docker",
@@ -37,6 +42,10 @@ var diagnostics = []diagnostic{
 		args:        []string{"--version"},
 		required:    false,
 		description: "Docker for containerized network experiments",
+		installCmd: map[string]string{
+			"darwin": "brew install --cask docker",
+			"linux":  "curl -fsSL https://get.docker.com | sh",
+		},
 	},
 	{
 		name:        "kubectl",
@@ -44,6 +53,10 @@ var diagnostics = []diagnostic{
 		args:        []string{"version", "--client"},
 		required:    false,
 		description: "Kubernetes CLI for cluster networking modules",
+		installCmd: map[string]string{
+			"darwin": "brew install kubectl",
+			"linux":  "curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\"",
+		},
 	},
 	{
 		name:        "kind",
@@ -51,6 +64,10 @@ var diagnostics = []diagnostic{
 		args:        []string{"version"},
 		required:    false,
 		description: "Kubernetes in Docker for local cluster setup",
+		installCmd: map[string]string{
+			"darwin": "brew install kind",
+			"linux":  "curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind",
+		},
 	},
 	{
 		name:        "tcpdump",
@@ -58,6 +75,21 @@ var diagnostics = []diagnostic{
 		args:        []string{"--version"},
 		required:    false,
 		description: "Network packet analyzer for traffic inspection",
+		installCmd: map[string]string{
+			"darwin": "brew install tcpdump",
+			"linux":  "sudo apt-get install tcpdump",
+		},
+	},
+	{
+		name:        "tshark",
+		command:     "tshark",
+		args:        []string{"--version"},
+		required:    false,
+		description: "Wireshark command-line packet analyzer for OSI lab",
+		installCmd: map[string]string{
+			"darwin": "brew install wireshark",
+			"linux":  "sudo apt-get install tshark",
+		},
 	},
 	{
 		name:        "ip",
@@ -65,6 +97,9 @@ var diagnostics = []diagnostic{
 		args:        []string{"--version"},
 		required:    false,
 		description: "Network configuration tool (Linux)",
+		installCmd: map[string]string{
+			"linux": "sudo apt-get install iproute2",
+		},
 	},
 	{
 		name:        "iptables",
@@ -72,7 +107,29 @@ var diagnostics = []diagnostic{
 		args:        []string{"--version"},
 		required:    false,
 		description: "Firewall administration tool (Linux)",
+		installCmd: map[string]string{
+			"linux": "sudo apt-get install iptables",
+		},
 	},
+}
+
+// ModuleDependencies defines what each module actually needs
+var ModuleDependencies = map[string][]string{
+	"01-osi-model":      {"Docker", "kubectl", "kind", "tcpdump", "tshark"},
+	"02-tcp-ip":         {"tcpdump", "tshark"},
+	"03-subnetting":     {"ip"},
+	"04-routing":        {"ip", "iptables"},
+	"05-k8s-networking": {"Docker", "kubectl", "kind"},
+	"06-cni":            {"Docker", "kubectl", "kind"},
+	"07-service-mesh":   {"Docker", "kubectl", "kind"},
+}
+
+type DependencyStatus struct {
+	Name       string
+	Status     string // "ok", "missing", "error"
+	Output     string
+	Required   bool
+	InstallCmd string
 }
 
 func RunDiagnostics() {
@@ -135,6 +192,78 @@ func RunDiagnostics() {
 	fmt.Println("💡 Run 'scripts/setup.sh' for guided installation help.")
 }
 
+// CheckModuleDependencies checks dependencies specific to a module
+func CheckModuleDependencies(moduleID string) ([]DependencyStatus, bool) {
+	requiredDeps, exists := ModuleDependencies[moduleID]
+	if !exists {
+		return nil, true // No specific requirements
+	}
+
+	var results []DependencyStatus
+	allGood := true
+
+	// Create a map for quick lookup
+	diagMap := make(map[string]diagnostic)
+	for _, diag := range diagnostics {
+		diagMap[diag.name] = diag
+	}
+
+	for _, depName := range requiredDeps {
+		if diag, exists := diagMap[depName]; exists {
+			status, output := checkCommand(diag.command, diag.args...)
+
+			installCmd := ""
+			if status == "missing" {
+				// Determine OS and get install command
+				os := getOS()
+				if cmd, hasCmd := diag.installCmd[os]; hasCmd {
+					installCmd = cmd
+				}
+			}
+
+			result := DependencyStatus{
+				Name:       diag.name,
+				Status:     status,
+				Output:     output,
+				Required:   true, // All module deps are required for that module
+				InstallCmd: installCmd,
+			}
+			results = append(results, result)
+
+			if status != "ok" {
+				allGood = false
+			}
+		}
+	}
+
+	return results, allGood
+}
+
+// GetInstallationGuide returns formatted installation instructions for missing dependencies
+func GetInstallationGuide(missingDeps []DependencyStatus) string {
+	if len(missingDeps) == 0 {
+		return ""
+	}
+
+	var guide strings.Builder
+	guide.WriteString(infoStyle.Render("📦 Installation Guide\n"))
+	guide.WriteString("\n")
+
+	os := getOS()
+	guide.WriteString(fmt.Sprintf("Detected OS: %s\n\n", os))
+
+	for _, dep := range missingDeps {
+		if dep.Status == "missing" && dep.InstallCmd != "" {
+			guide.WriteString(fmt.Sprintf("%s %s:\n",
+				warnStyle.Render("•"), dep.Name))
+			guide.WriteString(fmt.Sprintf("  %s\n\n", dep.InstallCmd))
+		}
+	}
+
+	guide.WriteString("After installation, run the module again or use 'netlab doctor' to verify.\n")
+	return guide.String()
+}
+
 func checkCommand(command string, args ...string) (string, string) {
 	cmd := exec.Command(command, args...)
 	output, err := cmd.Output()
@@ -149,4 +278,20 @@ func checkCommand(command string, args ...string) (string, string) {
 	}
 
 	return "ok", string(output)
+}
+
+func getOS() string {
+	// Simple OS detection - can be enhanced
+	if cmd := exec.Command("uname", "-s"); cmd.Run() == nil {
+		if output, err := cmd.Output(); err == nil {
+			os := strings.ToLower(strings.TrimSpace(string(output)))
+			if os == "darwin" {
+				return "darwin"
+			}
+			if os == "linux" {
+				return "linux"
+			}
+		}
+	}
+	return "unknown"
 }
